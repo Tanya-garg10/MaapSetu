@@ -33,7 +33,7 @@ export const useAppStore = create<AppState>((set) => ({
   setUser: (user) => set({ user }),
 
   currentReportId: null,
-  setCurrentReportId: (id) => set({ currentReportId: id }),
+  setCurrentReportId: (id) => set({ currentReportId: (id && id !== 'undefined' && id !== 'null') ? id : null }),
 
   reportData: {},
   updateReportData: (data) =>

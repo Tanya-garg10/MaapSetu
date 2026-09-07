@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 
 export function Step5Review() {
-  const { currentReportId, reportData, testResults } = useAppStore();
+  const { currentReportId, setCurrentReportId, reportData, testResults } = useAppStore();
   const [instrument, setInstrument] = useState<any>(null);
   const [overallResult, setOverallResult] = useState<string | null>(null);
   const [failedTests, setFailedTests] = useState<string[]>([]);
@@ -25,17 +25,73 @@ export function Step5Review() {
     }
   }, [reportData.instrumentId]);
 
+  // Helper to resolve a valid report ID from store, URL, or reportData
+  const getResolvedReportId = (): string | undefined => {
+    let id = currentReportId;
+    if (id === 'undefined' || id === 'null') id = null;
+    if (!id) {
+      const params = new URLSearchParams(window.location.search);
+      const paramId = params.get('id');
+      if (paramId && paramId !== 'undefined' && paramId !== 'null') {
+        id = paramId;
+      }
+    }
+    if (!id && reportData) {
+      const repId = reportData._id || reportData.id;
+      if (repId && repId !== 'undefined' && repId !== 'null') {
+        id = repId as string;
+      }
+    }
+    return id || undefined;
+  };
+
+  // Auto-save a draft if report is not saved yet
+  const ensureReportSaved = async (): Promise<string | null> => {
+    const existingId = getResolvedReportId();
+    if (existingId) return existingId;
+
+    try {
+      const data = useAppStore.getState().reportData;
+      const appNo = data.applicationNo || `NAWI-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const res = await fetch('/api/reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...data,
+          applicationNo: appNo,
+          status: 'Draft',
+        }),
+      });
+      const newReport = await res.json();
+      const newId = newReport._id || newReport.id;
+      if (newId) {
+        setCurrentReportId(newId);
+        const params = new URLSearchParams(window.location.search);
+        params.set('id', newId);
+        window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
+        return newId;
+      }
+    } catch (e) {
+      console.error('Failed to auto-create report draft:', e);
+    }
+    return null;
+  };
+
   const handleExportPDF = async () => {
-    if (!currentReportId) return;
     setPdfLoading(true);
     try {
-      const res = await fetch(`/api/reports/${currentReportId}/pdf`);
+      const id = await ensureReportSaved();
+      if (!id) {
+        alert('Could not save draft report. Please enter basic details in Step 1 first.');
+        return;
+      }
+      const res = await fetch(`/api/reports/${id}/pdf`);
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `NAWI-Report-${reportData.applicationNo || currentReportId}.pdf`;
+      a.download = `NAWI-Report-${reportData.applicationNo || id}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -49,15 +105,21 @@ export function Step5Review() {
   };
 
   const handleFinalize = async () => {
-    if (!currentReportId) return;
     setFinalizing(true);
     try {
-      const res = await fetch(`/api/reports/${currentReportId}/finalize`, {
+      const id = await ensureReportSaved();
+      if (!id) {
+        alert('Could not save draft report. Please enter basic details in Step 1 first.');
+        return;
+      }
+      const res = await fetch(`/api/reports/${id}/finalize`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
       });
       const data = await res.json();
       setOverallResult(data.overallResult);
       setFailedTests(data.failedTests || []);
+    } catch (err) {
+      console.error('Finalize error:', err);
     } finally { setFinalizing(false); }
   };
 
@@ -105,10 +167,10 @@ export function Step5Review() {
           <p className="text-sm text-near-black/50 mt-1">Confirm all data, determine overall compliance, and generate the report.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" onClick={handleExportPDF} disabled={!currentReportId || pdfLoading}>
+          <Button variant="outline" onClick={handleExportPDF} disabled={pdfLoading}>
             {pdfLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Export PDF
           </Button>
-          <Button onClick={handleFinalize} disabled={!currentReportId || finalizing}>
+          <Button onClick={handleFinalize} disabled={!getResolvedReportId() || finalizing}>
             {finalizing ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
             Determine Compliance
           </Button>

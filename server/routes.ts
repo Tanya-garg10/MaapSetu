@@ -1,6 +1,7 @@
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
+import mongoose from 'mongoose';
 import { Instrument, Report, TestResult, User, OimlRule } from './models';
 import PDFDocument from 'pdfkit';
 import {
@@ -90,8 +91,12 @@ router.post('/reports', async (req, res) => {
 });
 
 router.get('/reports/:id', async (req, res) => {
-  const report = await Report.findById(req.params.id).populate('instrumentId');
-  const results = await TestResult.find({ reportId: req.params.id });
+  const { id } = req.params;
+  if (!id || !mongoose.isValidObjectId(id)) {
+    return res.status(400).json({ error: 'Invalid report ID' });
+  }
+  const report = await Report.findById(id).populate('instrumentId');
+  const results = await TestResult.find({ reportId: id });
   res.json({ ...report?.toObject(), testResults: results });
 });
 
@@ -288,8 +293,8 @@ router.get('/oiml-rules', async (req, res) => {
 router.get('/reports/:id/pdf', async (req, res) => {
   try {
     const { id } = req.params;
-    if (!id || id === 'undefined' || id === 'null' || !/^[a-f\d]{24}$/i.test(id)) {
-      return res.status(400).json({ error: 'Invalid report ID' });
+    if (!id || !mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ error: 'Report ID is missing or invalid' });
     }
     const report = await Report.findById(id).populate('instrumentId');
     const results = await TestResult.find({ reportId: id });

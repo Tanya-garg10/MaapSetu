@@ -17,18 +17,27 @@ export function CreateReportLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const reportId = searchParams.get('id');
+  const rawReportId = searchParams.get('id');
+  const reportId = (rawReportId && rawReportId !== 'undefined' && rawReportId !== 'null') ? rawReportId : null;
   const { setCurrentReportId, updateReportData, updateTestResults, currentReportId } = useAppStore();
+
+  const validReportId = (currentReportId && currentReportId !== 'undefined' && currentReportId !== 'null') ? currentReportId : null;
 
   useEffect(() => {
     if (reportId) {
       setCurrentReportId(reportId);
       fetch(`/api/reports/${reportId}`)
-        .then(res => res.json())
+        .then(res => {
+          if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+          return res.json();
+        })
         .then(data => {
-          updateReportData(data);
-          updateTestResults(data.testResults || []);
-        });
+          if (data && !data.error) {
+            updateReportData(data);
+            updateTestResults(data.testResults || []);
+          }
+        })
+        .catch(err => console.error('Error loading report:', err));
     } else {
       setCurrentReportId(null);
       updateReportData({});
@@ -40,7 +49,7 @@ export function CreateReportLayout() {
   const activeStep = currentStepIndex >= 0 ? currentStepIndex : 0;
 
   const handleNext = async () => {
-    if (activeStep === 0 && !currentReportId) {
+    if (activeStep === 0 && !validReportId) {
       const data = useAppStore.getState().reportData;
       const res = await fetch('/api/reports', {
         method: 'POST',
@@ -48,15 +57,18 @@ export function CreateReportLayout() {
         body: JSON.stringify({ ...data, status: 'Draft' }),
       });
       const newReport = await res.json();
-      setCurrentReportId(newReport._id);
-      navigate(steps[activeStep + 1].path + `?id=${newReport._id}`);
+      const newId = newReport._id || newReport.id;
+      if (newId) {
+        setCurrentReportId(newId);
+        navigate(steps[activeStep + 1].path + `?id=${newId}`);
+      }
       return;
     }
 
     if (activeStep === steps.length - 1) {
-      if (!currentReportId) return;
+      if (!validReportId) return;
       try {
-        await fetch(`/api/reports/${currentReportId}`, {
+        await fetch(`/api/reports/${validReportId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: 'Completed' }),
@@ -69,13 +81,13 @@ export function CreateReportLayout() {
     }
 
     if (activeStep < steps.length - 1) {
-      navigate(steps[activeStep + 1].path + (currentReportId ? `?id=${currentReportId}` : ''));
+      navigate(steps[activeStep + 1].path + (validReportId ? `?id=${validReportId}` : ''));
     }
   };
 
   const handleBack = () => {
     if (activeStep > 0) {
-      navigate(steps[activeStep - 1].path + (currentReportId ? `?id=${currentReportId}` : ''));
+      navigate(steps[activeStep - 1].path + (validReportId ? `?id=${validReportId}` : ''));
     } else {
       navigate('/dashboard');
     }
@@ -95,7 +107,7 @@ export function CreateReportLayout() {
               return (
                 <React.Fragment key={step.id}>
                   <button
-                    onClick={() => navigate(step.path + (currentReportId ? `?id=${currentReportId}` : ''))}
+                    onClick={() => navigate(step.path + (validReportId ? `?id=${validReportId}` : ''))}
                     className={cn(
                       'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap',
                       isActive
